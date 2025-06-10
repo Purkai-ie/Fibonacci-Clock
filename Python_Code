@@ -1,0 +1,130 @@
+from ortools.linear_solver import pywraplp # for solving LP
+import pandas as pd	# to store solutions in a dataframe
+import matplotlib.pyplot as plt # to plot the clock
+import matplotlib.patches as patches
+from matplotlib.widgets import Button
+from matplotlib.animation import FuncAnimation
+
+columns=['x_vars0','x_vars1','x_vars2','x_vars3','x_vars4','x_vars5','x_vars6','x_vars7','x_vars8','x_vars9'] # name of the decision variables
+# Create a MIP solver (use 'SCIP' or 'CBC' for integer programming)
+solver = pywraplp.Solver.CreateSolver('SCIP')
+
+x_vars = [solver.IntVar(0, 1, f'x{i}') for i in range(10)] 
+big_m = 1000000
+small_m = 0.00001
+hour=int(input("Enter minutes:"))
+
+obj_func=(x_vars[0]+x_vars[2]+2*x_vars[4]+3*x_vars[6]+5*x_vars[8])*60 + (x_vars[1]+x_vars[3]+2*x_vars[5]+3*x_vars[7]+5*x_vars[9])*5
+
+solver.Add(obj_func==hour) # add objective function as aconstraint which equalizes it to the input hour.
+solver.Maximize(obj_func) # does not matter whether max or min. It is necessary to use the LP structure.
+status = solver.Solve() # solves the problem.
+
+if status == pywraplp.Solver.OPTIMAL:
+   counter = 1
+   solutions = pd.DataFrame([[x_vars[0].solution_value(),x_vars[1].solution_value(),x_vars[2].solution_value(),x_vars[3].solution_value(),x_vars[4].solution_value(),x_vars[5].solution_value(),x_vars[6].solution_value(),x_vars[7].solution_value(),x_vars[8].solution_value(),x_vars[9].solution_value()]])
+   while status == pywraplp.Solver.OPTIMAL:
+      subset = []
+      total=0
+      for i, var in enumerate(x_vars):
+         if var.solution_value() == 1.0:
+            subset.append(x_vars[i])
+            total = total + var.solution_value()
+      y_var = solver.IntVar(0, 1, 'y' + str(counter))
+      solver.Add(solver.Sum(subset) - small_m >= total - y_var * big_m ) # inequality added as greater and less then total to satisfy LP rules
+      solver.Add(solver.Sum(subset) + small_m <= total + (1-y_var) * big_m ) # inequality added as greater and less then total to satisfy LP rules
+      status = solver.Solve() # solves the problem.
+      if status == pywraplp.Solver.OPTIMAL:
+         new_row = pd.DataFrame([[x_vars[0].solution_value(),x_vars[1].solution_value(),x_vars[2].solution_value(),x_vars[3].solution_value(),x_vars[4].solution_value(),x_vars[5].solution_value(),x_vars[6].solution_value(),x_vars[7].solution_value(),x_vars[8].solution_value(),x_vars[9].solution_value()]])
+         solutions = pd.concat([solutions, new_row], ignore_index=True)
+         counter=counter+1
+      else:
+       print('The second problem does not have an optimal solution.')
+       solutions.columns=columns
+       print(solutions)
+else:
+    print('The problem does not have an optimal solution. Cannot show the given minutes with Fibonacci Clock')
+    exit()
+# drawing of Fibonacci clocks
+# decision of the color set
+color_sets = pd.DataFrame([])
+columns=[]
+columns=['1StSq','2NdSq','3RdSq','4ThSq','5ThSq']
+for i in range(len(solutions)):
+    new_row = []
+    for j in range(0,len(solutions.columns)-1,2):
+        if solutions.iloc[i, j] + solutions.iloc[i, j+1] == 2:
+           # blue
+           new_row.append('blue')
+        elif solutions.iloc[i, j] + solutions.iloc[i, j+1] == 0:
+           # white
+           new_row.append('white')
+        else:
+           if solutions.iloc[i, j] == 1:
+              # red
+              new_row.append('red')
+           else:
+              # green
+              new_row.append('green')
+        # print(f"Value at ({i},{j}) = {solutions.iloc[i, j]}")
+    new_row=pd.DataFrame([[new_row[0],new_row[1],new_row[2],new_row[3],new_row[4]]])
+    color_sets=pd.concat([color_sets, new_row], ignore_index=True)
+color_sets.columns=columns
+print(color_sets)
+
+# Fixed rectangle positions (x, y, width, height)
+rects_data = [
+    (0.5, 1.25, 0.25, 0.25), # 1st square
+    (0.5, 1, 0.25, 0.25),    # 2nd square
+    (0, 1, 0.5, 0.5),        # 3rd square
+    (0, 0, 0.75, 1),         # 4th square
+    (0.75, 0, 1.25, 1.5)     # 5th square
+]
+# Set up the figure
+fig, ax = plt.subplots()
+plt.subplots_adjust(bottom=0.2)
+ax.set_aspect('equal')
+ax.set_xlim(0, 2)
+ax.set_ylim(0, 1.75)
+plt.axis('off')
+# Create empty patches list (will update this)
+rect_patches = []
+for x, y, w, h in rects_data:
+    rect = patches.Rectangle((x, y), w, h, linewidth=1, edgecolor='black', facecolor='white')
+    ax.add_patch(rect)
+    rect_patches.append(rect)
+color_set=color_sets.values.tolist()
+
+frame_index = [0]  # use list so we can modify inside inner functions
+
+# Animation update function
+def update_display():
+    colors = color_set[frame_index[0]]
+    for rect, color in zip(rect_patches, colors):
+        rect.set_facecolor(color)
+    ax.set_title(f"Frame {frame_index[0] + 1}/{len(color_set)}")
+    fig.canvas.draw_idle()
+# Create animation
+anim = FuncAnimation(fig, update_display, frames=len(color_sets), interval=1000, blit=False, repeat=True)
+# Button callbacks
+def next_frame(event):
+    if frame_index[0] < len(color_sets) - 1:
+        frame_index[0] += 1
+        update_display()
+
+def prev_frame(event):
+    if frame_index[0] > 0:
+        frame_index[0] -= 1
+        update_display()
+
+# Add buttons
+axprev = plt.axes([0.3, 0.05, 0.1, 0.075])
+axnext = plt.axes([0.6, 0.05, 0.1, 0.075])
+btn_prev = Button(axprev, 'Previous')
+btn_next = Button(axnext, 'Next')
+btn_prev.on_clicked(prev_frame)
+btn_next.on_clicked(next_frame)
+
+# Initial display
+update_display()
+plt.show()
